@@ -1,0 +1,96 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto py-8">
+    <h2 class="text-2xl font-bold mb-4 text-center">Manage Halls</h2>
+
+    <form method="POST" class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-6 border">
+        {{ form.hidden_tag() }}
+        <div class="mb-4">
+            {{ form.name.label(class="block text-gray-700 text-sm font-bold mb-2") }}
+            {{ form.name(class="shadow appearance-none border rounded w-full py-2 px-3") }}
+        </div>
+        <div class="mb-4">
+            {{ form.capacity.label(class="block text-gray-700 text-sm font-bold mb-2") }}
+            {{ form.capacity(class="shadow appearance-none border rounded w-full py-2 px-3") }}
+        </div>
+        <div class="mb-4">
+            <label class="block text-gray-700 text-sm font-bold mb-2">Select Hall Location on Map</label>
+            <div id="map" style="height: 300px; min-height: 300px;"></div>
+            <small id="map-msg" class="text-red-500"></small>
+        </div>
+        {{ form.latitude(type="hidden", id="latitude") }}
+        {{ form.longitude(type="hidden", id="longitude") }}
+        <div>
+            {{ form.submit(class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded") }}
+        </div>
+    </form>
+
+    <h3 class="text-xl font-semibold mb-2">Existing Halls</h3>
+    <ul class="bg-white shadow border rounded">
+        {% for hall in halls %}
+        <li class="flex justify-between items-center p-3 border-b">
+            <span>{{ hall.name }} ({{ hall.capacity }} seats)</span>
+            <form method="POST" action="{{ url_for('delete_hall', hall_id=hall.id) }}">
+                <button type="submit" class="text-red-500 hover:text-red-700">Delete</button>
+            </form>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+
+<!-- Leaflet CSS & JS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+    // Default map center: Sathyabama University
+    var defaultLat = 12.8722;
+    var defaultLng = 80.2256;
+    var map = L.map('map').setView([defaultLat, defaultLng], 16);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    var marker;
+
+    function setMarker(lat, lng) {
+        if (marker) {
+            marker.setLatLng([lat, lng]);
+        } else {
+            marker = L.marker([lat, lng], {draggable: true}).addTo(map);
+            marker.on('dragend', function(e) {
+                var pos = marker.getLatLng();
+                document.getElementById('latitude').value = pos.lat;
+                document.getElementById('longitude').value = pos.lng;
+            });
+        }
+        document.getElementById('latitude').value = lat;
+        document.getElementById('longitude').value = lng;
+    }
+
+    map.on('click', function(e) {
+        setMarker(e.latlng.lat, e.latlng.lng);
+    });
+
+    // If editing, show existing marker
+    var latField = document.getElementById('latitude');
+    var lngField = document.getElementById('longitude');
+    if (latField.value && lngField.value) {
+        setMarker(latField.value, lngField.value);
+        map.setView([latField.value, lngField.value], 15);
+    }
+
+    // Show a message if lat/lng are not set before submit
+    document.querySelector('form').onsubmit = function(e) {
+        var lat = document.getElementById('latitude').value;
+        var lng = document.getElementById('longitude').value;
+        if (!lat || !lng) {
+            document.getElementById('map-msg').textContent = 'Please select a location on the map.';
+            e.preventDefault();
+            return false;
+        }
+    };
+</script>
+{% endblock %}

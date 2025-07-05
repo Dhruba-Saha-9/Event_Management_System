@@ -1,0 +1,293 @@
+{% extends 'base.html' %}
+
+{% block title %}Track Event Location | EventHub{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+<style>
+    #map {
+        height: 400px;
+        border-radius: 0.75rem;
+        box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+    }
+    .location-info {
+        background: white;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+    }
+    .spinner {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 3px solid rgba(37, 99, 235, 0.3);
+        border-radius: 50%;
+        border-top-color: #2563eb;
+        animation: spin 1s ease-in-out infinite;
+    }
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+    .accuracy-warning {
+        background: #fef3c7;
+        border: 1px solid #fde68a;
+        color: #92400e;
+        padding: 0.5rem;
+        border-radius: 0.5rem;
+        margin-top: 0.5rem;
+        font-size: 0.875rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="text-center mb-6">
+    <h1 class="card-title">Track Event Location</h1>
+    <p class="card-text">Find your way to the event venue</p>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        {% if event %}
+        <div class="location-info">
+            <h3 class="card-title mb-2">{{ event.title }}</h3>
+            <p class="mb-1"><strong>Venue:</strong> {{ event.hall.name if event.hall else 'TBD' }}</p>
+            <p class="mb-1"><strong>Date:</strong> {{ event.date.strftime('%B %d, %Y') }}</p>
+            {% if event.time %}
+                <p class="mb-0"><strong>Time:</strong> {{ event.time.strftime('%I:%M %p') }}</p>
+            {% endif %}
+        </div>
+        {% endif %}
+        
+        <div id="map"></div>
+        
+        <div class="text-center mt-4">
+            <button id="locate-btn" class="btn btn-primary">
+                <span id="btn-text">Detect My Location</span>
+                <span id="btn-spinner" class="spinner" style="display: none;"></span>
+            </button>
+            <div id="geo-msg" class="mt-2 text-sm"></div>
+            <div id="accuracy-warning" class="accuracy-warning" style="display: none;"></div>
+        </div>
+        
+        <div class="mt-4">
+            <div class="alert alert-warning">
+                <strong>Note:</strong> For better location accuracy:
+                <ul class="mt-2" style="text-align: left;">
+                    <li>Allow location access when prompted</li>
+                    <li>Enable GPS on your device</li>
+                    <li>Move to an open area for better signal</li>
+                    <li>If location seems wrong, try refreshing the page</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Event coordinates
+    var eventLat = {{ lat|tojson|safe }};
+    var eventLng = {{ lng|tojson|safe }};
+    
+    // Default center (Sathyabama University coordinates)
+    var defaultLat = 12.8722;
+    var defaultLng = 80.2256;
+    
+    // Set center based on event location or default
+    var centerLat = (eventLat !== null ? eventLat : defaultLat);
+    var centerLng = (eventLng !== null ? eventLng : defaultLng);
+    var zoom = (eventLat !== null && eventLng !== null) ? 17 : 16;
+    
+    // Initialize map
+    var map = L.map('map').setView([centerLat, centerLng], zoom);
+
+    // Add tile layer
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Event marker
+    var eventMarker;
+    if (eventLat !== null && eventLng !== null) {
+        eventMarker = L.marker([eventLat, eventLng], {
+            icon: L.icon({
+                iconUrl: 'https://cdn-icons-png.flaticon.com/512/684/684908.png',
+                iconSize: [32, 32],
+                iconAnchor: [16, 32]
+            })
+        }).addTo(map);
+        eventMarker.bindPopup('<strong>Event Location</strong><br>{{ event.title if event else "Event" }}').openPopup();
+    }
+
+    // User location variables
+    var userMarker, line;
+    var locateBtn = document.getElementById('locate-btn');
+    var btnText = document.getElementById('btn-text');
+    var btnSpinner = document.getElementById('btn-spinner');
+    var geoMsg = document.getElementById('geo-msg');
+    var accuracyWarning = document.getElementById('accuracy-warning');
+
+    // Location detection function with multiple attempts
+    function detectLocation() {
+        // Update button state
+        btnText.textContent = 'Detecting...';
+        btnSpinner.style.display = 'inline-block';
+        geoMsg.textContent = '';
+        geoMsg.className = 'mt-2 text-sm';
+        accuracyWarning.style.display = 'none';
+
+        // Check if geolocation is supported
+        if (!navigator.geolocation) {
+            showError('Geolocation is not supported by your browser.');
+            return;
+        }
+
+        // Try to get location with high accuracy first
+        tryGetLocation(true);
+    }
+
+    function tryGetLocation(highAccuracy) {
+        var options = {
+            enableHighAccuracy: highAccuracy,
+            timeout: 15000,
+            maximumAge: 0  // Don't use cached location to get fresh GPS data
+        };
+
+        navigator.geolocation.getCurrentPosition(
+            function(position) {
+                // Success callback
+                btnText.textContent = 'Location Found!';
+                btnSpinner.style.display = 'none';
+                
+                var lat = position.coords.latitude;
+                var lng = position.coords.longitude;
+                var accuracy = position.coords.accuracy;
+                
+                console.log('Location detected:', lat, lng, 'Accuracy:', accuracy + 'm');
+
+                // Check accuracy and show warning if poor
+                if (accuracy > 1000) { // More than 1km accuracy
+                    showAccuracyWarning(accuracy);
+                }
+
+                setUserLocation(lat, lng, accuracy);
+                
+                // Reset button after 2 seconds
+                setTimeout(function() {
+                    btnText.textContent = 'Detect My Location';
+                }, 2000);
+            },
+            function(error) {
+                // Error callback
+                console.error('Geolocation error:', error);
+                
+                // If high accuracy failed, try with low accuracy
+                if (highAccuracy && error.code === 3) { // Timeout error
+                    console.log('High accuracy failed, trying low accuracy...');
+                    tryGetLocation(false);
+                    return;
+                }
+                
+                btnText.textContent = 'Detect My Location';
+                btnSpinner.style.display = 'none';
+                
+                switch(error.code) {
+                    case 1:
+                        showError('Location permission denied. Please allow location access in your browser settings.');
+                        break;
+                    case 2:
+                        showError('Location unavailable. Please check your GPS/network connection and try again.');
+                        break;
+                    case 3:
+                        showError('Location request timed out. Please try again or move to an open area.');
+                        break;
+                    default:
+                        showError('Unable to retrieve your location. Please try again.');
+                }
+            },
+            options
+        );
+    }
+
+    function setUserLocation(lat, lng, accuracy) {
+        // Update or create user marker
+        if (userMarker) {
+            userMarker.setLatLng([lat, lng]);
+        } else {
+            userMarker = L.marker([lat, lng], {
+                icon: L.icon({
+                    iconUrl: 'https://cdn-icons-png.flaticon.com/512/149/149060.png',
+                    iconSize: [32, 32],
+                    iconAnchor: [16, 32]
+                })
+            }).addTo(map);
+        }
+        
+        var accuracyText = accuracy < 1000 ? Math.round(accuracy) + 'm' : (accuracy/1000).toFixed(1) + 'km';
+        userMarker.bindPopup('<strong>Your Location</strong><br>Accuracy: ' + accuracyText).openPopup();
+
+        // If event location exists, draw route
+        if (eventLat !== null && eventLng !== null) {
+            // Fit map to show both markers
+            var group = L.featureGroup([eventMarker, userMarker]);
+            map.fitBounds(group.getBounds().pad(0.3));
+            
+            // Draw line between user and event
+            if (line) map.removeLayer(line);
+            line = L.polyline([[lat, lng], [eventLat, eventLng]], {
+                color: '#2563eb',
+                weight: 3,
+                dashArray: '10, 10',
+                opacity: 0.8
+            }).addTo(map);
+            
+            // Calculate distance
+            var distance = calculateDistance(lat, lng, eventLat, eventLng);
+            showSuccess('Distance to event: ' + distance);
+        } else {
+            map.setView([lat, lng], 16);
+            showSuccess('Your location detected successfully!');
+        }
+    }
+
+    function showAccuracyWarning(accuracy) {
+        var accuracyText = accuracy < 1000 ? Math.round(accuracy) + 'm' : (accuracy/1000).toFixed(1) + 'km';
+        accuracyWarning.innerHTML = '<strong>Low Accuracy Warning:</strong> Your location accuracy is ' + accuracyText + '. For better results, try moving to an open area or enabling GPS.';
+        accuracyWarning.style.display = 'block';
+    }
+
+    function showError(message) {
+        geoMsg.textContent = message;
+        geoMsg.className = 'mt-2 text-sm alert-danger';
+    }
+
+    function showSuccess(message) {
+        geoMsg.textContent = message;
+        geoMsg.className = 'mt-2 text-sm alert-success';
+    }
+
+    function calculateDistance(lat1, lon1, lat2, lon2) {
+        var R = 6371; // Radius of the earth in km
+        var dLat = deg2rad(lat2 - lat1);
+        var dLon = deg2rad(lon2 - lon1);
+        var a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * Math.sin(dLon/2) * Math.sin(dLon/2);
+        var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        var d = R * c; // Distance in km
+        return d < 1 ? Math.round(d * 1000) + 'm' : Math.round(d * 10) / 10 + 'km';
+    }
+
+    function deg2rad(deg) {
+        return deg * (Math.PI/180);
+    }
+
+    // Attach click handler
+    locateBtn.addEventListener('click', detectLocation);
+});
+</script>
+{% endblock %} 

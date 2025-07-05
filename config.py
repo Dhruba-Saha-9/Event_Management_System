@@ -30,3 +30,11 @@ class Config:
     
     # Pagination
     EVENTS_PER_PAGE = 10
+
+class ProductionConfig(Config):
+    DEBUG = False
+    # Add production-specific settings here
+
+class DevelopmentConfig(Config):
+    DEBUG = True
+    # Add development-specific settings here
